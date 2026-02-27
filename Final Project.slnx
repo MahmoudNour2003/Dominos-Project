@@ -1,3 +1,5 @@
 <Solution>
-  <Project Path="Final Project/Final Project.csproj" />
+  <Project Path="DominoClient/DominoClient.csproj" />
+  <Project Path="DominoServer/DominoServer.csproj" />
+  <Project Path="DominoShared/DominoShared.csproj" />
 </Solution>
