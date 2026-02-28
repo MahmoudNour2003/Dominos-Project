@@ -56,7 +56,7 @@ public class ClientHandler(TcpClient client, ServerManager server)
     private string HandleCommand(string message)
     {
         var parts = message.Split('|');
-        var command = parts[0].Trim().ToUpperInvariant();
+        var command = parts[0].Trim().TrimStart('\uFEFF').ToUpperInvariant();
         var payload = parts.Length > 1 ? parts[1].Trim() : string.Empty;
 
         return command switch

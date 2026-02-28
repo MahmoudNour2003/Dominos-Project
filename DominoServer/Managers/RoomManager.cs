@@ -1,7 +1,10 @@
 using System.Text.Json;
 using DominoShared.DTOs;
-using DominoShared.Models;
-using DominoServer.Networking;
+using SharedGameStatus = DominoShared.Models.GameStatus;
+using SharedPlayer = DominoShared.Models.Player;
+using SharedRoom = DominoShared.Models.Room;
+using NetClientHandler = DominoServer.Networking.ClientHandler;
+using NetServerManager = DominoServer.Networking.ServerManager;
 
 namespace DominoServer.Managers;
 
@@ -12,18 +15,18 @@ namespace DominoServer.Managers;
 /// </summary>
 public class RoomManager
 {
-    private readonly Dictionary<string, Room> _rooms = new();
+    private readonly Dictionary<string, SharedRoom> _rooms = new();
     private readonly Dictionary<string, string> _playerToRoom = new(); // Maps username to room name
-    private readonly ServerManager _serverManager;
+    private readonly NetServerManager _serverManager;
 
     // Events for room changes
-    public event Action<Room>? OnRoomCreated;
+    public event Action<SharedRoom>? OnRoomCreated;
     public event Action<string>? OnRoomDeleted;
-    public event Action<Room, string>? OnPlayerJoinedRoom; // Room, Username
-    public event Action<Room, string>? OnPlayerLeftRoom;   // Room, Username
-    public event Action<Room>? OnRoomStatusChanged;
+    public event Action<SharedRoom, string>? OnPlayerJoinedRoom; // Room, Username
+    public event Action<SharedRoom, string>? OnPlayerLeftRoom;   // Room, Username
+    public event Action<SharedRoom>? OnRoomStatusChanged;
 
-    public RoomManager(ServerManager serverManager)
+    public RoomManager(NetServerManager serverManager)
     {
         _serverManager = serverManager;
         _serverManager.OnMessageReceived += HandleMessageAsync;
@@ -34,7 +37,7 @@ public class RoomManager
     /// Create a new room.
     /// Only room owner can start the game.
     /// </summary>
-    public Room? CreateRoom(string roomName, string ownerUsername, int maxPlayers, int winningScore)
+    public SharedRoom? CreateRoom(string roomName, string ownerUsername, int maxPlayers, int winningScore)
     {
         lock (_rooms)
         {
@@ -52,17 +55,17 @@ public class RoomManager
                 return null;
             }
 
-            var room = new Room
+            var room = new SharedRoom
             {
                 Name = roomName,
                 Owner = ownerUsername,
                 MaxPlayers = maxPlayers,
                 WinningScore = winningScore,
-                Status = GameStatus.Waiting
+                Status = SharedGameStatus.Waiting
             };
 
             // Add owner as first player
-            room.Players.Add(new Player { Username = ownerUsername });
+            room.Players.Add(new SharedPlayer { Username = ownerUsername });
             _rooms[roomName] = room;
             _playerToRoom[ownerUsername] = roomName;
 
@@ -102,7 +105,7 @@ public class RoomManager
             }
 
             // Add player to room
-            room.Players.Add(new Player { Username = username });
+            room.Players.Add(new SharedPlayer { Username = username });
             _playerToRoom[username] = roomName;
 
             Console.WriteLine($"[RoomManager] Player {username} joined room '{roomName}'. Players: {room.Players.Count}/{room.MaxPlayers}");
@@ -127,7 +130,7 @@ public class RoomManager
             }
 
             // Check if game is actually playing
-            if (room.Status != GameStatus.Playing)
+            if (room.Status != SharedGameStatus.Playing)
             {
                 Console.WriteLine($"[RoomManager] Room '{roomName}' is not currently playing");
                 return false;
@@ -141,7 +144,7 @@ public class RoomManager
             }
 
             // Add as watcher
-            room.Watchers.Add(new Player { Username = username });
+            room.Watchers.Add(new SharedPlayer { Username = username });
             _playerToRoom[username] = roomName;
 
             Console.WriteLine($"[RoomManager] Player {username} started watching room '{roomName}'");
@@ -186,7 +189,7 @@ public class RoomManager
             }
 
             // Delete room if owner left and no one is playing
-            if (room.Owner == username && room.Status != GameStatus.Playing)
+            if (room.Owner == username && room.Status != SharedGameStatus.Playing)
             {
                 _rooms.Remove(roomName);
                 Console.WriteLine($"[RoomManager] Room '{roomName}' deleted (owner left)");
@@ -200,7 +203,7 @@ public class RoomManager
     /// <summary>
     /// Set room status (called by GameOrchestrator when game starts/ends)
     /// </summary>
-    public void SetRoomStatus(string roomName, GameStatus status)
+    public void SetRoomStatus(string roomName, SharedGameStatus status)
     {
         lock (_rooms)
         {
@@ -216,18 +219,18 @@ public class RoomManager
     /// <summary>
     /// Get all available rooms for client display.
     /// </summary>
-    public List<Room> GetAllRooms()
+    public List<SharedRoom> GetAllRooms()
     {
         lock (_rooms)
         {
-            return new List<Room>(_rooms.Values);
+            return new List<SharedRoom>(_rooms.Values);
         }
     }
 
     /// <summary>
     /// Get a specific room by name.
     /// </summary>
-    public Room? GetRoom(string roomName)
+    public SharedRoom? GetRoom(string roomName)
     {
         lock (_rooms)
         {
@@ -267,7 +270,7 @@ public class RoomManager
     /// <summary>
     /// Route room-related messages to this manager.
     /// </summary>
-    private void HandleMessageAsync(ClientHandler handler, NetworkMessage message)
+    private void HandleMessageAsync(NetClientHandler handler, NetworkMessage message)
     {
         switch (message.Action)
         {
@@ -286,7 +289,7 @@ public class RoomManager
         }
     }
 
-    private void HandleCreateRoom(ClientHandler handler, NetworkMessage message)
+    private void HandleCreateRoom(NetClientHandler handler, NetworkMessage message)
     {
         try
         {
@@ -314,7 +317,7 @@ public class RoomManager
         }
     }
 
-    private void HandleJoinRoom(ClientHandler handler, NetworkMessage message)
+    private void HandleJoinRoom(NetClientHandler handler, NetworkMessage message)
     {
         try
         {
@@ -340,7 +343,7 @@ public class RoomManager
         }
     }
 
-    private void HandleWatchRoom(ClientHandler handler, NetworkMessage message)
+    private void HandleWatchRoom(NetClientHandler handler, NetworkMessage message)
     {
         try
         {
@@ -365,7 +368,7 @@ public class RoomManager
         }
     }
 
-    private void HandleLeaveRoom(ClientHandler handler, NetworkMessage message)
+    private void HandleLeaveRoom(NetClientHandler handler, NetworkMessage message)
     {
         LeaveRoom(message.Username);
         _ = BroadcastRoomListAsync();
@@ -374,7 +377,7 @@ public class RoomManager
     /// <summary>
     /// Handle player disconnect by removing them from all rooms.
     /// </summary>
-    private void HandleClientDisconnected(ClientHandler handler)
+    private void HandleClientDisconnected(NetClientHandler handler)
     {
         if (handler.Username != null)
         {
@@ -383,7 +386,7 @@ public class RoomManager
         }
     }
 
-    private void SendSuccessToClient(ClientHandler handler, string message)
+    private void SendSuccessToClient(NetClientHandler handler, string message)
     {
         var response = new NetworkMessage
         {
@@ -394,7 +397,7 @@ public class RoomManager
         _ = handler.SendAsync(response);
     }
 
-    private void SendErrorToClient(ClientHandler handler, string errorMessage)
+    private void SendErrorToClient(NetClientHandler handler, string errorMessage)
     {
         var response = new NetworkMessage
         {

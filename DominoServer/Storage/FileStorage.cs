@@ -1,5 +1,5 @@
 using DominoShared.Engine;
-using DominoShared.Models;
+using SharedRoom = DominoShared.Models.Room;
 
 namespace DominoServer.Storage;
 
@@ -38,7 +38,7 @@ public class FileStorage
     ///     Player Name = "PlayerName", Player Points = 100
     ///     Player Name = "PlayerName", Player Points = 95
     /// </summary>
-    public async Task SaveGameResultAsync(string roomName, GameState gameState, Room room)
+    public async Task SaveGameResultAsync(string roomName, GameState gameState, SharedRoom room)
     {
         try
         {
@@ -88,7 +88,7 @@ public class FileStorage
     /// <summary>
     /// Save game result (overload for easier calling)
     /// </summary>
-    public async Task SaveGameResultAsync(GameState gameState, Room room)
+    public async Task SaveGameResultAsync(GameState gameState, SharedRoom room)
     {
         await SaveGameResultAsync(gameState.RoomName, gameState, room);
     }

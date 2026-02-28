@@ -1,6 +1,7 @@
 using DominoShared.DTOs;
-using DominoShared.Models;
-using DominoServer.Networking;
+using NetClientHandler = DominoServer.Networking.ClientHandler;
+using NetServerManager = DominoServer.Networking.ServerManager;
+using SharedPlayer = DominoShared.Models.Player;
 
 namespace DominoServer.Managers;
 
@@ -10,15 +11,15 @@ namespace DominoServer.Managers;
 /// </summary>
 public class PlayerManager
 {
-    private readonly Dictionary<string, Player> _players = new();
-    private readonly Dictionary<string, ClientHandler> _playerToClient = new();
-    private readonly ServerManager _serverManager;
+    private readonly Dictionary<string, SharedPlayer> _players = new();
+    private readonly Dictionary<string, NetClientHandler> _playerToClient = new();
+    private readonly NetServerManager _serverManager;
 
     // Events for player changes
-    public event Action<Player>? OnPlayerJoined;
+    public event Action<SharedPlayer>? OnPlayerJoined;
     public event Action<string>? OnPlayerLeft;
 
-    public PlayerManager(ServerManager serverManager)
+    public PlayerManager(NetServerManager serverManager)
     {
         _serverManager = serverManager;
 
@@ -30,7 +31,7 @@ public class PlayerManager
     /// <summary>
     /// Add a player to the system when they login.
     /// </summary>
-    public void LoginPlayer(string username, ClientHandler clientHandler)
+    public void LoginPlayer(string username, NetClientHandler clientHandler)
     {
         lock (_players)
         {
@@ -40,7 +41,7 @@ public class PlayerManager
                 return;
             }
 
-            var player = new Player { Username = username };
+            var player = new SharedPlayer { Username = username };
             _players[username] = player;
             _playerToClient[username] = clientHandler;
 
@@ -68,11 +69,11 @@ public class PlayerManager
     /// <summary>
     /// Get all connected players.
     /// </summary>
-    public List<Player> GetAllPlayers()
+    public List<SharedPlayer> GetAllPlayers()
     {
         lock (_players)
         {
-            return new List<Player>(_players.Values);
+            return new List<SharedPlayer>(_players.Values);
         }
     }
 
@@ -106,7 +107,7 @@ public class PlayerManager
     /// <summary>
     /// Route LOGIN messages to this manager.
     /// </summary>
-    private void HandleMessageAsync(ClientHandler handler, NetworkMessage message)
+    private void HandleMessageAsync(NetClientHandler handler, NetworkMessage message)
     {
         if (message.Action == "LOGIN")
         {
@@ -118,7 +119,7 @@ public class PlayerManager
     /// <summary>
     /// Handle client disconnect by logging out the player.
     /// </summary>
-    private void HandleClientDisconnected(ClientHandler handler)
+    private void HandleClientDisconnected(NetClientHandler handler)
     {
         if (handler.Username != null)
         {

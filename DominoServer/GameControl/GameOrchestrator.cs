@@ -3,8 +3,11 @@ using DominoShared.DTOs;
 using DominoShared.Engine;
 using DominoShared.Models;
 using DominoServer.Managers;
-using DominoServer.Networking;
 using DominoServer.Storage;
+using SharedGameStatus = DominoShared.Models.GameStatus;
+using SharedRoom = DominoShared.Models.Room;
+using NetClientHandler = DominoServer.Networking.ClientHandler;
+using NetServerManager = DominoServer.Networking.ServerManager;
 
 namespace DominoServer.GameControl;
 
@@ -16,7 +19,7 @@ namespace DominoServer.GameControl;
 /// </summary>
 public class GameOrchestrator
 {
-    private readonly ServerManager _serverManager;
+    private readonly NetServerManager _serverManager;
     private readonly RoomManager _roomManager;
     private readonly FileStorage _fileStorage;
     private readonly Dictionary<string, GameState> _gameStates = new();
@@ -31,7 +34,7 @@ public class GameOrchestrator
     public event Action<string, string>? OnGameEnded;           // RoomName, Winner
 
     public GameOrchestrator(
-        ServerManager serverManager,
+        NetServerManager serverManager,
         RoomManager roomManager,
         Func<IDeck>? deckFactory = null,
         Func<IRulesEngine>? rulesFactory = null,
@@ -139,7 +142,7 @@ public class GameOrchestrator
     /// <summary>
     /// Handle PLAY_CARD message
     /// </summary>
-    private async Task HandlePlayCardAsync(ClientHandler handler, NetworkMessage message)
+    private async Task HandlePlayCardAsync(NetClientHandler handler, NetworkMessage message)
     {
         if (string.IsNullOrEmpty(message.RoomName))
         {
@@ -229,7 +232,7 @@ public class GameOrchestrator
     /// <summary>
     /// Handle PASS message
     /// </summary>
-    private async Task HandlePassAsync(ClientHandler handler, NetworkMessage message)
+    private async Task HandlePassAsync(NetClientHandler handler, NetworkMessage message)
     {
         if (string.IsNullOrEmpty(message.RoomName))
         {
@@ -367,10 +370,10 @@ public class GameOrchestrator
     /// <summary>
     /// When player joins room, check if we should start game
     /// </summary>
-    private void HandlePlayerJoinedRoom(Room room, string username)
+    private void HandlePlayerJoinedRoom(SharedRoom room, string username)
     {
         // If room now has enough players, start the game
-        if (room.Players.Count >= room.MaxPlayers && room.Status == GameStatus.Waiting)
+        if (room.Players.Count >= room.MaxPlayers && room.Status == SharedGameStatus.Waiting)
         {
             _ = StartGameAsync(room.Name);
         }
@@ -379,9 +382,9 @@ public class GameOrchestrator
     /// <summary>
     /// When player leaves room during game, handle disconnection
     /// </summary>
-    private void HandlePlayerLeftRoom(Room room, string username)
+    private void HandlePlayerLeftRoom(SharedRoom room, string username)
     {
-        if (room.Status == GameStatus.Playing)
+        if (room.Status == SharedGameStatus.Playing)
         {
             Console.WriteLine($"[GameOrchestrator] Player {username} left room '{room.Name}' during game");
             // TODO: Handle mid-game disconnect (forfeit? pause?)
@@ -391,7 +394,7 @@ public class GameOrchestrator
     /// <summary>
     /// Route game messages to appropriate handlers
     /// </summary>
-    private void HandleGameMessage(ClientHandler handler, NetworkMessage message)
+    private void HandleGameMessage(NetClientHandler handler, NetworkMessage message)
     {
         switch (message.Action)
         {

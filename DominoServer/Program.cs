@@ -1,13 +1,13 @@
 using DominoServer.GameControl;
 using DominoServer.Managers;
-using DominoServer.Networking;
 using DominoServer.Storage;
+using NetServerManager = DominoServer.Networking.ServerManager;
 
 namespace DominoServer;
 
 internal static class Program
 {
-    private static ServerManager? _serverManager;
+    private static NetServerManager? _serverManager;
     private static PlayerManager? _playerManager;
     private static RoomManager? _roomManager;
     private static GameOrchestrator? _gameOrchestrator;
@@ -30,7 +30,7 @@ internal static class Program
         _fileStorage = new FileStorage();
 
         // Initialize managers in order
-        _serverManager = new ServerManager();
+        _serverManager = new NetServerManager();
         _playerManager = new PlayerManager(_serverManager);
         _roomManager = new RoomManager(_serverManager);
         
