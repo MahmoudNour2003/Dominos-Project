@@ -1,4 +1,4 @@
-namespace DominoClient
+namespace Final_Project
 {
     internal static class Program
     {
@@ -11,7 +11,7 @@ namespace DominoClient
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
-            Application.Run(new LoginForm());
+            Application.Run(new Form1());
         }
     }
 }
