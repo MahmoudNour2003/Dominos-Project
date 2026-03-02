@@ -150,26 +150,26 @@ public class GameOrchestrator
     /// </summary>
     private async Task HandlePlayCardAsync(NetClientHandler handler, NetworkMessage message)
     {
-        if (string.IsNullOrEmpty(message.RoomName))
-        {
-            await handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Room not specified" });
-            return;
-        }
+                if (string.IsNullOrEmpty(message.RoomName))
+            {
+                await handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Room not specified" });
+                return;
+            }
 
         try
         {
             var cardData = JsonSerializer.Deserialize<PlayCardRequest>(message.Data ?? "{}");
-            if (cardData == null)
-            {
-                await handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Invalid card data" });
-                return;
-            }
+                if (cardData == null)
+                {
+                    await handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Invalid card data" });
+                    return;
+                }
 
             lock (_gameStates)
             {
                 if (!_gameStates.TryGetValue(message.RoomName, out var gameState))
                 {
-                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Game not found" });
+                    _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Game not found" });
                     return;
                 }
 
@@ -177,14 +177,14 @@ public class GameOrchestrator
                 var currentPlayer = gameState.GetCurrentPlayerUsername();
                 if (currentPlayer != message.Username)
                 {
-                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Not your turn" });
+                    _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Not your turn" });
                     return;
                 }
 
                 // Get player's hand
                 if (!gameState.PlayerHands.TryGetValue(message.Username, out var hand))
                 {
-                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Player hand not found" });
+                    _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Player hand not found" });
                     return;
                 }
 
@@ -192,7 +192,7 @@ public class GameOrchestrator
                 var card = hand.FirstOrDefault(c => c.LeftValue == cardData.LeftValue && c.RightValue == cardData.RightValue);
                 if (card == null)
                 {
-                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Card not in hand" });
+                    _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Card not in hand" });
                     return;
                 }
 
@@ -200,13 +200,84 @@ public class GameOrchestrator
                 var rules = _gameRules[message.RoomName];
                 if (!rules.IsValidMove(card, gameState.TableCards))
                 {
-                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Invalid move" });
+                    _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = false, ErrorMessage = "Invalid move" });
                     return;
                 }
 
-                // Play the card
+                // Decide which end to play on and orient the tile so the chain remains consistent.
+                DominoShared.Models.DominoCard playedCard = card;
+                if (gameState.TableCards.Count == 0)
+                {
+                    // First card can be placed as-is
+                    gameState.TableCards.Add(playedCard);
+                }
+                else
+                {
+                    var leftEnd = gameState.TableCards.First().LeftValue;
+                    var rightEnd = gameState.TableCards.Last().RightValue;
+                    var validEnd = rules.GetValidEnd(card, gameState.TableCards);
+
+                    // If the card only fits on the left, prepend it so that the touching value is adjacent
+                    if (validEnd == "LEFT")
+                    {
+                        if (card.RightValue == leftEnd)
+                        {
+                            playedCard = card;
+                        }
+                        else if (card.LeftValue == leftEnd)
+                        {
+                            playedCard = new DominoShared.Models.DominoCard(card.RightValue, card.LeftValue);
+                        }
+                        gameState.TableCards.Insert(0, playedCard);
+                    }
+                    // If the card only fits on the right, append it and orient to match the right end
+                    else if (validEnd == "RIGHT")
+                    {
+                        if (card.LeftValue == rightEnd)
+                        {
+                            playedCard = card;
+                        }
+                        else if (card.RightValue == rightEnd)
+                        {
+                            playedCard = new DominoShared.Models.DominoCard(card.RightValue, card.LeftValue);
+                        }
+                        gameState.TableCards.Add(playedCard);
+                    }
+                    else // BOTH or fallback: respect client choice when available, otherwise append to right
+                    {
+                        var requestedSide = (cardData.Side ?? string.Empty).ToUpperInvariant();
+
+                        if (requestedSide == "LEFT")
+                        {
+                            // Treat as left placement
+                            if (card.RightValue == leftEnd)
+                            {
+                                playedCard = card;
+                            }
+                            else if (card.LeftValue == leftEnd)
+                            {
+                                playedCard = new DominoShared.Models.DominoCard(card.RightValue, card.LeftValue);
+                            }
+                            gameState.TableCards.Insert(0, playedCard);
+                        }
+                        else
+                        {
+                            // Default / "RIGHT": append to the right side
+                            if (card.LeftValue == rightEnd)
+                            {
+                                playedCard = card;
+                            }
+                            else if (card.RightValue == rightEnd)
+                            {
+                                playedCard = new DominoShared.Models.DominoCard(card.RightValue, card.LeftValue);
+                            }
+                            gameState.TableCards.Add(playedCard);
+                        }
+                    }
+                }
+
+                // Remove from hand and update count
                 hand.Remove(card);
-                gameState.TableCards.Add(card);
                 gameState.PlayerCardCounts[message.Username] = hand.Count;
 
                 // Check if player finished
@@ -223,7 +294,7 @@ public class GameOrchestrator
                     gameState.Players[gameState.CurrentPlayerIndex].IsActive = true;
                 }
 
-                _ = handler.SendAsync(new NetworkMessage { Success = true, ErrorMessage = "Card played" });
+                _ = handler.SendAsync(new NetworkMessage { Action = "PLAY_CARD", Success = true, ErrorMessage = "Card played" });
             }
 
             await BroadcastGameStateAsync(message.RoomName);
@@ -245,7 +316,6 @@ public class GameOrchestrator
             await handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Room not specified" });
             return;
         }
-
         try
         {
             lock (_gameStates)
@@ -264,7 +334,7 @@ public class GameOrchestrator
                     return;
                 }
 
-                // Check if player can pass
+                // Passing is only allowed when rules permit it (typically when side deck is empty)
                 var rules = _gameRules[message.RoomName];
                 if (!rules.CanPass(gameState.SideDeckCount))
                 {
@@ -279,11 +349,16 @@ public class GameOrchestrator
                 gameState.Players[gameState.CurrentPlayerIndex].IsActive = false;
                 gameState.CurrentPlayerIndex = (gameState.CurrentPlayerIndex + 1) % gameState.Players.Count;
                 gameState.Players[gameState.CurrentPlayerIndex].IsActive = true;
+                // If all players have passed, finish the round
+                if (gameState.Players.All(p => p.PassedThisRound))
+                {
+                    gameState.IsRoundFinished = true;
+                }
 
                 _ = handler.SendAsync(new NetworkMessage { Success = true, ErrorMessage = "Passed" });
             }
-
             await BroadcastGameStateAsync(message.RoomName);
+            await CheckRoundEndAsync(message.RoomName);
         }
         catch (Exception ex)
         {
@@ -331,6 +406,13 @@ public class GameOrchestrator
                     _ = _fileStorage.SaveGameResultAsync(gameState, room);
                     
                     OnGameEnded?.Invoke(roomName, winner.Key);
+                    // End processing - game has a winner
+                    return;
+                }
+                else
+                {
+                    // No overall winner yet - prepare next round
+                    ResetForNextRound(roomName);
                 }
             }
         }
@@ -386,6 +468,56 @@ public class GameOrchestrator
     }
 
     /// <summary>
+    /// Prepare the game state for the next round: reshuffle/deal, reset per-round flags and scores.
+    /// Assumptions: deal the same number of cards per player as initial round (7), rotate starting player by one.
+    /// This is a conservative, low-risk reset that preserves total scores and continues the game.
+    /// </summary>
+    private void ResetForNextRound(string roomName)
+    {
+        lock (_gameStates)
+        {
+            if (!_gameStates.TryGetValue(roomName, out var gameState))
+                return;
+
+            // Create a fresh deck for the new round
+            var deck = _deckFactory();
+            deck.GenerateDeck();
+            deck.Shuffle();
+            _gameDecks[roomName] = deck;
+
+            const int cardsPerPlayer = 7;
+
+            // Clear table cards
+            gameState.TableCards = new List<DominoShared.Models.DominoCard>();
+
+            // Rotate starting player by one to be fair
+            var playersCount = gameState.Players.Count;
+            if (playersCount == 0)
+                return;
+
+            var newStarterIndex = (gameState.CurrentPlayerIndex + 1) % playersCount;
+
+            // Deal new hands
+            foreach (var player in gameState.Players)
+            {
+                var hand = deck.DrawCards(cardsPerPlayer);
+                gameState.PlayerHands[player.Username] = hand;
+                gameState.PlayerCardCounts[player.Username] = hand.Count;
+                gameState.CurrentScores[player.Username] = 0; // reset round score
+                player.PassedThisRound = false;
+                player.IsActive = false;
+            }
+
+            gameState.SideDeckCount = deck.RemainingCards;
+            gameState.IsRoundFinished = false;
+            gameState.CurrentPlayerIndex = newStarterIndex;
+            gameState.Players[gameState.CurrentPlayerIndex].IsActive = true;
+
+            Console.WriteLine($"[GameOrchestrator] Reset for next round in '{roomName}'. Starter: {gameState.Players[gameState.CurrentPlayerIndex].Username}");
+        }
+    }
+
+    /// <summary>
     /// When player leaves room during game, handle disconnection
     /// </summary>
     private void HandlePlayerLeftRoom(SharedRoom room, string username)
@@ -410,6 +542,9 @@ public class GameOrchestrator
             case "PASS":
                 _ = HandlePassAsync(handler, message);
                 break;
+            case "DRAW_CARD":
+                _ = HandleDrawCardAsync(handler, message);
+                break;
         }
     }
 
@@ -420,5 +555,85 @@ public class GameOrchestrator
     {
         public int LeftValue { get; set; }
         public int RightValue { get; set; }
+        /// <summary>
+        /// Optional side hint from client when a card can be played on both ends.
+        /// Expected values: "LEFT", "RIGHT", or null/empty when not specified.
+        /// </summary>
+        public string? Side { get; set; }
+    }
+    
+    /// <summary>
+    /// Handle DRAW_CARD message - draw a single card from the side deck to player's hand.
+    /// </summary>
+    private async Task HandleDrawCardAsync(NetClientHandler handler, NetworkMessage message)
+    {
+        if (string.IsNullOrEmpty(message.RoomName))
+        {
+            await handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Room not specified" });
+            return;
+        }
+
+        try
+        {
+            lock (_gameStates)
+            {
+                if (!_gameStates.TryGetValue(message.RoomName, out var gameState))
+                {
+                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Game not found" });
+                    return;
+                }
+
+                // Validate it's this player's turn
+                var currentPlayer = gameState.GetCurrentPlayerUsername();
+                if (currentPlayer != message.Username)
+                {
+                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Not your turn" });
+                    return;
+                }
+
+                var deck = _gameDecks[message.RoomName];
+                if (deck.RemainingCards <= 0)
+                {
+                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "No cards in side deck" });
+                    return;
+                }
+
+                var drawn = deck.DrawCards(1);
+                if (!gameState.PlayerHands.TryGetValue(message.Username, out var hand))
+                {
+                    hand = new List<DominoShared.Models.DominoCard>();
+                    gameState.PlayerHands[message.Username] = hand;
+                }
+
+                if (drawn.Count > 0)
+                {
+                    hand.AddRange(drawn);
+                    gameState.PlayerCardCounts[message.Username] = hand.Count;
+                    gameState.SideDeckCount = deck.RemainingCards;
+
+                    // Send updated hand to the drawing player
+                    _ = handler.SendAsync(new NetworkMessage
+                    {
+                        Action = "HAND_RECEIVED",
+                        RoomName = message.RoomName,
+                        Data = JsonSerializer.Serialize(hand),
+                        Timestamp = DateTime.UtcNow,
+                        Success = true
+                    });
+
+                    _ = handler.SendAsync(new NetworkMessage { Success = true, ErrorMessage = "Drew 1 card" });
+                }
+                else
+                {
+                    _ = handler.SendAsync(new NetworkMessage { Success = false, ErrorMessage = "Failed to draw card" });
+                }
+            }
+
+            await BroadcastGameStateAsync(message.RoomName);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GameOrchestrator] Error handling draw: {ex.Message}");
+        }
     }
 }

@@ -142,6 +142,9 @@ public class LobbyForm : Form
                 case "ROOM_LIST":
                     HandleRoomList(netMsg);
                     break;
+                case "ROOM_CREATED":
+                    HandleRoomCreated(netMsg);
+                    break;
                 case "CREATE_ROOM":
                     HandleCreateRoomResponse(netMsg);
                     break;
@@ -250,6 +253,47 @@ public class LobbyForm : Form
         else
         {
             MessageBox.Show(message.ErrorMessage ?? "Failed to create room", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void HandleRoomCreated(NetworkMessage message)
+    {
+        // A new room was created by another client (or us) - add it to the list incrementally.
+        if (message.Data == null) return;
+
+        try
+        {
+            var room = JsonSerializer.Deserialize<DominoShared.Models.Room>(message.Data);
+            if (room == null) return;
+
+            var display = $"{room.Name} ({room.Players.Count}/{room.MaxPlayers}) - {room.Status}";
+
+            // If the room list already contains this room (by name), refresh full list to avoid inconsistencies
+            var exists = _lstRooms.Items.Cast<object?>().Any(it => it?.ToString()?.StartsWith(room.Name + " ") == true || it?.ToString() == display);
+            if (exists)
+            {
+                RequestRoomList();
+                return;
+            }
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(() => HandleRoomCreated(message));
+                return;
+            }
+
+            // If 'No rooms available' or 'Loading rooms...' present, replace list
+            if (_lstRooms.Items.Count == 1 && (_lstRooms.Items[0].ToString() == "No rooms available" || _lstRooms.Items[0].ToString() == "Loading rooms..."))
+            {
+                _lstRooms.Items.Clear();
+            }
+
+            _lstRooms.Items.Add(display);
+        }
+        catch
+        {
+            // If anything goes wrong, fall back to full refresh
+            RequestRoomList();
         }
     }
 

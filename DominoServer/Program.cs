@@ -35,12 +35,12 @@ internal static class Program
         _playerManager = new PlayerManager(_serverManager);
         _roomManager = new RoomManager(_serverManager);
         
-        // GameOrchestrator with mock implementations for testing
+        // GameOrchestrator with implementations
         _gameOrchestrator = new GameOrchestrator(
-            _serverManager, 
-            _roomManager, 
+            _serverManager,
+            _roomManager,
             deckFactory: () => new MockDeck(),
-            rulesFactory: () => new MockRulesEngine(),
+            rulesFactory: () => new StandardRulesEngine(),
             fileStorage: _fileStorage
         );
 
@@ -93,7 +93,7 @@ internal static class Program
 
         Console.WriteLine("\n[Server] Ready for clients. Press Ctrl+C to stop...");
         Console.WriteLine($"[Storage] Results directory: {_fileStorage?.GetResultsDirectory()}");
-        Console.WriteLine("[NOTE] Using mock Deck and RulesEngine for testing\n");
+    Console.WriteLine("[NOTE] Using mock Deck and StandardRulesEngine for testing\n");
 
         // Keep console alive
         Console.CancelKeyPress += (sender, args) =>
