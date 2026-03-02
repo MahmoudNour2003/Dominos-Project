@@ -25,6 +25,15 @@ public class GameForm : Form
     private DominoShared.Engine.GameState? _lastGameState;
     private readonly Button _btnLeaveGame;
 
+    // Board state tracking for proper domino placement
+    private int _leftEndValue = -1;
+    private int _rightEndValue = -1;
+    private int _currentLeftX = 0;
+    private int _currentRightX = 0;
+    private int _centerY = 0;
+    private bool _firstDominoPlaced = false;
+    private const int DOMINO_SPACING = 2; // Spacing between dominoes
+
     public GameForm(ClientManager clientManager, string username, DominoShared.Engine.GameState initialGameState)
     {
         _clientManager = clientManager;
@@ -308,8 +317,20 @@ public class GameForm : Form
 
             Console.WriteLine($"[GameForm] Game ended. Winner: {endData.Winner}");
             
-            // Display game end results
-            string resultMessage = $"Game Over!\n\nWinner: {endData.Winner}";
+            // Display game end results with personalized message
+            string resultTitle;
+            string resultMessage;
+            
+            if (endData.Winner == _username)
+            {
+                resultTitle = "You Win! 🎉";
+                resultMessage = "Congratulations! You won the game!";
+            }
+            else
+            {
+                resultTitle = "You Lose!";
+                resultMessage = $"Game Over! Winner: {endData.Winner}";
+            }
             
             // Add final scores if available
             if (endData.FinalScores != null && endData.FinalScores.Count > 0)
@@ -323,7 +344,7 @@ public class GameForm : Form
 
             MessageBox.Show(
                 resultMessage,
-                "Game Ended",
+                resultTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information
             );
@@ -966,8 +987,8 @@ public class GameForm : Form
     }
 
     /// <summary>
-    /// Renders domino tiles horizontally in the board panel with support for left and right placement.
-    /// Displays tiles in two rows: left side tiles and right side tiles, indicating play direction.
+    /// Renders domino tiles on the board panel using absolute positioning.
+    /// Places first domino at center, subsequent tiles expand left/right.
     /// </summary>
     /// <param name="boardTiles">List of domino tiles to render on the board</param>
     public void RenderBoard(List<DominoShared.Models.DominoCard> boardTiles)
@@ -995,107 +1016,46 @@ public class GameForm : Form
             return;
         }
 
-        // Create main container
-        var mainContainer = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            RowCount = 3,
-            ColumnCount = 1,
-            Padding = new Padding(10),
-            BackColor = Color.Transparent,
-            AutoScroll = true
-        };
+        // Reset board state for new render
+        _leftEndValue = boardTiles[0].LeftValue;
+        _rightEndValue = boardTiles[boardTiles.Count - 1].RightValue;
+        _firstDominoPlaced = false;
 
-        // Set row styles
-        mainContainer.RowStyles.Add(new RowStyle(SizeType.Absolute, 40)); // Left label
-        mainContainer.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // Tiles
-        mainContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Right section
+        // Calculate center position
+        _centerY = _boardPanel.Height / 2;
+        int boardCenterX = _boardPanel.Width / 2;
 
-        // Left side label
-        var lblLeft = new Label
-        {
-            Text = "← Left Side",
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-            ForeColor = Color.White,
-            AutoSize = true,
-            Dock = DockStyle.Left,
-            Margin = new Padding(5),
-            BackColor = Color.Transparent
-        };
-        mainContainer.Controls.Add(lblLeft, 0, 0);
-
-        // Left tiles flow panel
-        var leftFlow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            AutoScroll = true,
-            BackColor = Color.Transparent,
-            Padding = new Padding(5),
-            WrapContents = false,
-            Height = 130
-        };
-
-        // Right tiles flow panel
-        var rightFlow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            AutoScroll = true,
-            BackColor = Color.Transparent,
-            Padding = new Padding(5),
-            WrapContents = false,
-            Height = 130
-        };
-
-        // Add tiles in order to the right flow (simple linear rendering)
+        // Calculate total width needed for all tiles
+        const int TILE_WIDTH = 80;
+        const int TILE_GAP = 2;
+        int totalWidth = (boardTiles.Count * TILE_WIDTH) + ((boardTiles.Count - 1) * TILE_GAP);
+        
+        // Calculate starting X to center the entire chain
+        int startX = boardCenterX - (totalWidth / 2);
+        int currentX = startX;
+        
         foreach (var tile in boardTiles)
         {
+            // Create domino tile control
             var dominoTile = new DominoTileControl
             {
                 LeftValue = tile.LeftValue,
                 RightValue = tile.RightValue,
-                Margin = new Padding(3),
-                Size = new Size(80, 120)
+                Size = new Size(TILE_WIDTH, 120),
+                Location = new Point(currentX, _centerY - 60),
+                Enabled = false,
+                BackColor = Color.White
             };
 
-            dominoTile.Enabled = false;
-            rightFlow.Controls.Add(dominoTile);
+            _boardPanel.Controls.Add(dominoTile);
+            currentX += TILE_WIDTH + TILE_GAP; // Move to next position
         }
+    }
 
-        mainContainer.Controls.Add(leftFlow, 0, 1);
-
-        // Right section container
-        var rightSection = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            RowCount = 2,
-            ColumnCount = 1,
-            BackColor = Color.Transparent,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink
-        };
-
-        rightSection.RowStyles.Add(new RowStyle(SizeType.Absolute, 40)); // Right label
-        rightSection.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); // Tiles
-
-        var lblRight = new Label
-        {
-            Text = "Right Side →",
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-            ForeColor = Color.White,
-            AutoSize = true,
-            Dock = DockStyle.Left,
-            Margin = new Padding(5),
-            BackColor = Color.Transparent
-        };
-
-        rightSection.Controls.Add(lblRight, 0, 0);
-        rightSection.Controls.Add(rightFlow, 0, 1);
-
-        mainContainer.Controls.Add(rightSection, 0, 2);
-
-        _boardPanel.Controls.Add(mainContainer);
+    private bool DeterminePlacementSide(DominoShared.Models.DominoCard tile, int index)
+    {
+        // Simple strategy: place alternately on left and right
+        return index % 2 == 0;
     }
 
     private void BtnLeaveGame_Click(object? sender, EventArgs e)

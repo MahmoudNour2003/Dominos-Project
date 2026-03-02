@@ -371,6 +371,10 @@ public class GameOrchestrator
     /// </summary>
     private async Task CheckRoundEndAsync(string roomName)
     {
+        bool gameEnded = false;
+        string? gameWinner = null;
+        GameState? endingGameState = null;
+
         lock (_gameStates)
         {
             if (!_gameStates.TryGetValue(roomName, out var gameState))
@@ -379,15 +383,60 @@ public class GameOrchestrator
             if (!gameState.IsRoundFinished)
                 return;
 
-            // Calculate round points for remaining cards
-            var rules = _gameRules[roomName];
+            // Find the round winner (player with 0 cards in hand)
+            string? roundWinner = null;
             foreach (var player in gameState.Players)
             {
                 if (gameState.PlayerHands.TryGetValue(player.Username, out var hand))
                 {
-                    var points = rules.CalculateRoundPoints(hand);
-                    gameState.CurrentScores[player.Username] = points;
-                    gameState.TotalScores[player.Username] += points;
+                    if (hand.Count == 0)
+                    {
+                        roundWinner = player.Username;
+                        break;
+                    }
+                }
+            }
+
+            // Calculate round points
+            // Round winner gets points from all remaining cards of other players
+            var rules = _gameRules[roomName];
+            
+            // If there's a round winner, calculate their points
+            if (!string.IsNullOrEmpty(roundWinner))
+            {
+                int roundWinnerPoints = 0;
+                
+                // Round winner gets points from ALL other players' remaining cards
+                foreach (var player in gameState.Players)
+                {
+                    if (player.Username != roundWinner)
+                    {
+                        if (gameState.PlayerHands.TryGetValue(player.Username, out var hand))
+                        {
+                            roundWinnerPoints += rules.CalculateRoundPoints(hand);
+                        }
+                    }
+                }
+                
+                gameState.CurrentScores[roundWinner] = roundWinnerPoints;
+                gameState.TotalScores[roundWinner] += roundWinnerPoints;
+                
+                // Other players get 0 points this round
+                foreach (var player in gameState.Players)
+                {
+                    if (player.Username != roundWinner)
+                    {
+                        gameState.CurrentScores[player.Username] = 0;
+                        // TotalScores stays the same for non-winners
+                    }
+                }
+            }
+            else
+            {
+                // No round winner (all passed) - everyone gets 0 points
+                foreach (var player in gameState.Players)
+                {
+                    gameState.CurrentScores[player.Username] = 0;
                 }
             }
 
@@ -400,14 +449,15 @@ public class GameOrchestrator
                 {
                     gameState.Winner = winner.Key;
                     gameState.IsGameActive = false;
+                    gameEnded = true;
+                    gameWinner = winner.Key;
+                    endingGameState = gameState;
                     Console.WriteLine($"[GameOrchestrator] Game finished in '{roomName}'. Winner: {winner.Key}");
                     
                     // Save game result to file (Phase E)
                     _ = _fileStorage.SaveGameResultAsync(gameState, room);
                     
                     OnGameEnded?.Invoke(roomName, winner.Key);
-                    // End processing - game has a winner
-                    return;
                 }
                 else
                 {
@@ -417,7 +467,40 @@ public class GameOrchestrator
             }
         }
 
+        // Broadcast game state (includes final state if game ended)
         await BroadcastGameStateAsync(roomName);
+        
+        // If game ended, also send specific GAME_ENDED message to all players
+        if (gameEnded && !string.IsNullOrEmpty(gameWinner) && endingGameState != null)
+        {
+            var gameEndedData = new
+            {
+                Winner = gameWinner,
+                FinalScores = endingGameState.TotalScores
+            };
+            
+            var endedMessage = new NetworkMessage
+            {
+                Action = "GAME_ENDED",
+                RoomName = roomName,
+                Data = JsonSerializer.Serialize(gameEndedData),
+                Timestamp = DateTime.UtcNow
+            };
+            
+            var room = _roomManager.GetRoom(roomName);
+            if (room != null)
+            {
+                var tasks = new List<Task>();
+                foreach (var player in room.Players.Concat(room.Watchers))
+                {
+                    tasks.Add(_serverManager.SendToPlayerAsync(player.Username, endedMessage));
+                }
+                if (tasks.Count > 0)
+                {
+                    await Task.WhenAll(tasks);
+                }
+            }
+        }
     }
 
     /// <summary>
