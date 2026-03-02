@@ -1,47 +1,48 @@
 using DominoShared.Engine;
 using DominoShared.Models;
 
-namespace DominoServer.Mocks;
+namespace DominoServer.GameControl;
 
 /// <summary>
-/// Temporary mock implementation of IRulesEngine for testing.
-/// Replace with Dev 2's real implementation.
+/// Concrete implementation of IRulesEngine with standard domino rules.
+/// This is a conservative, well-documented first pass implementing common domino behavior
+/// required by the GameOrchestrator: move validation, pass policy and simple scoring.
 /// </summary>
-public class MockRulesEngine : IRulesEngine
+public class StandardRulesEngine : IRulesEngine
 {
     public bool IsValidMove(DominoCard card, List<DominoCard> tableCards)
     {
-        // If board is empty, any card is valid
+        if (card == null) return false;
+
+        // If board is empty any card is valid
         if (tableCards == null || tableCards.Count == 0)
             return true;
 
-        // Get the ends of the domino chain
         var leftEnd = tableCards.First().LeftValue;
         var rightEnd = tableCards.Last().RightValue;
 
-        // Check if the card can connect to either end
+        // A card is valid if one of its ends matches either end of the chain
         return card.LeftValue == leftEnd || card.RightValue == leftEnd ||
                card.LeftValue == rightEnd || card.RightValue == rightEnd;
     }
 
     public bool CanPass(int sideDeckCount)
     {
-        // Player can only pass if side deck is empty
+        // Standard simple rule: players can only pass when there are no cards left in the side deck.
         return sideDeckCount == 0;
     }
 
     public int CalculateRoundPoints(List<DominoCard> hand)
     {
-        if (hand == null)
-            return 0;
+        if (hand == null) return 0;
 
-        return hand.Sum(card => card.LeftValue + card.RightValue);
+        return hand.Sum(c => c.LeftValue + c.RightValue);
     }
 
     public string GetValidEnd(DominoCard card, List<DominoCard> tableCards)
     {
-        if (tableCards == null || tableCards.Count == 0)
-            return "BOTH";
+        if (card == null) return "NONE";
+        if (tableCards == null || tableCards.Count == 0) return "BOTH";
 
         var leftEnd = tableCards.First().LeftValue;
         var rightEnd = tableCards.Last().RightValue;
@@ -49,13 +50,9 @@ public class MockRulesEngine : IRulesEngine
         bool canPlayLeft = card.LeftValue == leftEnd || card.RightValue == leftEnd;
         bool canPlayRight = card.LeftValue == rightEnd || card.RightValue == rightEnd;
 
-        if (canPlayLeft && canPlayRight)
-            return "BOTH";
-        else if (canPlayLeft)
-            return "LEFT";
-        else if (canPlayRight)
-            return "RIGHT";
-        else
-            return "NONE";
+        if (canPlayLeft && canPlayRight) return "BOTH";
+        if (canPlayLeft) return "LEFT";
+        if (canPlayRight) return "RIGHT";
+        return "NONE";
     }
 }

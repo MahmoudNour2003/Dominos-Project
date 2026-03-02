@@ -10,6 +10,7 @@ public class GameForm : Form
     private readonly ClientManager _clientManager;
     private readonly string _username;
     private readonly string _roomName;
+    private readonly ToolTip _toolTip;
 
     private readonly Panel _topPanel;
     private readonly Panel _boardPanel;
@@ -18,6 +19,10 @@ public class GameForm : Form
 
     private readonly Label _lblCurrentTurn;
     private readonly Label _lblScore;
+    private readonly Label _lblPlayerInfo;
+    private readonly Button _btnDraw;
+    private readonly Button _btnPass;
+    private DominoShared.Engine.GameState? _lastGameState;
     private readonly Button _btnLeaveGame;
 
     public GameForm(ClientManager clientManager, string username, DominoShared.Engine.GameState initialGameState)
@@ -25,15 +30,20 @@ public class GameForm : Form
         _clientManager = clientManager;
         _username = username;
         _roomName = initialGameState.RoomName;
+        _lastGameState = initialGameState;
+        _toolTip = new ToolTip();
 
         _topPanel = new Panel();
         _boardPanel = new Panel();
         _handPanel = new FlowLayoutPanel();
         _bottomPanel = new Panel();
 
-        _lblCurrentTurn = new Label();
-        _lblScore = new Label();
-        _btnLeaveGame = new Button();
+    _lblCurrentTurn = new Label();
+    _lblScore = new Label();
+    _lblPlayerInfo = new Label();
+    _btnLeaveGame = new Button();
+    _btnDraw = new Button();
+    _btnPass = new Button();
 
         InitializeComponent();
         SetupLayout();
@@ -159,6 +169,9 @@ public class GameForm : Form
 
             var gameState = JsonSerializer.Deserialize<DominoShared.Engine.GameState>(msg.Data);
             if (gameState == null) return;
+
+            // Keep last known state so tile playability uses up-to-date board
+            _lastGameState = gameState;
 
             Console.WriteLine($"[GameForm] Game started in room '{gameState.RoomName}'");
             
@@ -368,6 +381,9 @@ public class GameForm : Form
             var gameState = JsonSerializer.Deserialize<DominoShared.Engine.GameState>(message.Data);
             if (gameState == null) return;
 
+            // Keep last known state for UI decisions
+            _lastGameState = gameState;
+
             ProcessGameState(gameState);
         }
         catch (Exception ex)
@@ -400,9 +416,35 @@ public class GameForm : Form
             DisplayHand(hand);
         }
 
+        // Update side deck display
+        UpdateSideDeckCount(gameState.SideDeckCount);
+
+        // Enable / disable Draw and Pass buttons based on turn and deck state
+        var isMyTurn = string.Equals(currentPlayer, _username, StringComparison.OrdinalIgnoreCase);
+        _btnDraw.Enabled = isMyTurn && gameState.SideDeckCount > 0;
+        _btnPass.Enabled = isMyTurn && gameState.SideDeckCount == 0;
+
+        // Update player info label with friendly status
+        _lblPlayerInfo.Text = isMyTurn
+            ? $"Player: {_username} (Your turn)"
+            : $"Player: {_username} (Waiting for {currentPlayer})";
+
         // Update board
         var boardStrings = gameState.TableCards.Select(c => $"{c.LeftValue}-{c.RightValue}").ToList();
         UpdateBoard(boardStrings);
+    }
+
+    private bool IsTilePlayable(DominoShared.Models.DominoCard tile, DominoShared.Engine.GameState gameState)
+    {
+        // If board empty any tile is playable
+        if (gameState.TableCards == null || gameState.TableCards.Count == 0)
+            return true;
+
+        var leftEnd = gameState.TableCards.First().LeftValue;
+        var rightEnd = gameState.TableCards.Last().RightValue;
+
+        return tile.LeftValue == leftEnd || tile.RightValue == leftEnd ||
+               tile.LeftValue == rightEnd || tile.RightValue == rightEnd;
     }
 
     private void SetupLayout()
@@ -522,17 +564,34 @@ public class GameForm : Form
         _btnLeaveGame.Margin = new Padding(5);
         _btnLeaveGame.Click += BtnLeaveGame_Click;
 
-        var lblPlayerInfo = new Label
-        {
-            Text = $"Player: {_username}",
-            Font = new Font("Segoe UI", 10F),
-            AutoSize = true,
-            Margin = new Padding(10, 12, 5, 5),
-            ForeColor = Color.FromArgb(100, 100, 100)
-        };
+    _btnDraw.Text = "Draw";
+    _btnDraw.Size = new Size(100, 40);
+    _btnDraw.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+    _btnDraw.BackColor = Color.FromArgb(0, 120, 215);
+    _btnDraw.ForeColor = Color.White;
+    _btnDraw.FlatStyle = FlatStyle.Flat;
+    _btnDraw.Margin = new Padding(5);
+    _btnDraw.Click += BtnDraw_Click;
 
-        controlPanel.Controls.Add(_btnLeaveGame);
-        controlPanel.Controls.Add(lblPlayerInfo);
+        _btnPass.Text = "Pass";
+        _btnPass.Size = new Size(100, 40);
+        _btnPass.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+        _btnPass.BackColor = Color.FromArgb(255, 193, 7); // Amber
+        _btnPass.ForeColor = Color.Black;
+        _btnPass.FlatStyle = FlatStyle.Flat;
+        _btnPass.Margin = new Padding(5);
+        _btnPass.Click += BtnPass_Click;
+
+        _lblPlayerInfo.Text = $"Player: {_username} (Waiting...)";
+        _lblPlayerInfo.Font = new Font("Segoe UI", 10F);
+        _lblPlayerInfo.AutoSize = true;
+        _lblPlayerInfo.Margin = new Padding(10, 12, 5, 5);
+        _lblPlayerInfo.ForeColor = Color.FromArgb(100, 100, 100);
+
+    controlPanel.Controls.Add(_btnLeaveGame);
+    controlPanel.Controls.Add(_btnDraw);
+        controlPanel.Controls.Add(_btnPass);
+    controlPanel.Controls.Add(_lblPlayerInfo);
 
         bottomSplit.Panel2.Controls.Add(controlPanel);
 
@@ -567,6 +626,18 @@ public class GameForm : Form
         }
 
         _lblScore.Text = $"Score: {score}";
+    }
+
+    public void UpdateSideDeckCount(int count)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => UpdateSideDeckCount(count));
+            return;
+        }
+
+        // Append side deck info to score label for compact UI
+        _lblScore.Text = _lblScore.Text.Split('|')[0].Trim() + $" | Deck: {count}";
     }
 
     public void UpdatePlayerHand(List<string> cards)
@@ -657,6 +728,18 @@ public class GameForm : Form
                 Tag = tile // Store the actual tile object for later use
             };
 
+            // Determine if this tile is playable given the last known game state
+            if (_lastGameState != null)
+            {
+                var playable = IsTilePlayable(tile, _lastGameState);
+                dominoTile.IsPlayable = playable;
+                // If it's not the player's turn, disable clicking entirely
+                dominoTile.Enabled = _lastGameState.GetCurrentPlayerUsername() == _username && playable;
+            }
+
+            // Friendly tooltip showing the tile value
+            _toolTip.SetToolTip(dominoTile, $"{tile.LeftValue} | {tile.RightValue}");
+
             dominoTile.TileClicked += DominoTile_Clicked;
 
             _handPanel.Controls.Add(dominoTile);
@@ -666,10 +749,14 @@ public class GameForm : Form
     private void DominoTile_Clicked(object? sender, EventArgs e)
     {
         if (sender is not DominoTileControl tile) return;
-
-        // Check if it's the current player's turn
+        // Check if it's the current player's turn and tile is playable
         if (_lblCurrentTurn.Text.Contains(_username) && _lblCurrentTurn.ForeColor == Color.FromArgb(0, 180, 0))
         {
+            if (!tile.IsPlayable)
+            {
+                MessageBox.Show("This tile cannot be played on the current board.", "Invalid Tile", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             // Deselect all other tiles
             foreach (Control control in _handPanel.Controls)
             {
@@ -694,7 +781,42 @@ public class GameForm : Form
 
                 if (result == DialogResult.Yes)
                 {
-                    _ = PlayCardAsync(tile.LeftValue, tile.RightValue);
+                    // If the tile can be played on both ends, ask user which side
+                    string? sideChoice = null;
+                    if (_lastGameState != null && _lastGameState.TableCards.Count > 0)
+                    {
+                        var leftEnd = _lastGameState.TableCards.First().LeftValue;
+                        var rightEnd = _lastGameState.TableCards.Last().RightValue;
+                        var matchesLeft = tile.LeftValue == leftEnd || tile.RightValue == leftEnd;
+                        var matchesRight = tile.LeftValue == rightEnd || tile.RightValue == rightEnd;
+
+                        if (matchesLeft && matchesRight)
+                        {
+                            var sideResult = MessageBox.Show(
+                                "This tile can be played on both ends.\n\nYes = Left side, No = Right side.",
+                                "Choose Side",
+                                MessageBoxButtons.YesNoCancel,
+                                MessageBoxIcon.Question
+                            );
+
+                            if (sideResult == DialogResult.Yes)
+                            {
+                                sideChoice = "LEFT";
+                            }
+                            else if (sideResult == DialogResult.No)
+                            {
+                                sideChoice = "RIGHT";
+                            }
+                            else
+                            {
+                                // Cancel playing this tile
+                                tile.IsSelected = false;
+                                return;
+                            }
+                        }
+                    }
+
+                    _ = PlayCardAsync(tile.LeftValue, tile.RightValue, sideChoice);
                 }
                 else
                 {
@@ -708,7 +830,7 @@ public class GameForm : Form
         }
     }
 
-    private async Task PlayCardAsync(int leftValue, int rightValue)
+    private async Task PlayCardAsync(int leftValue, int rightValue, string? side = null)
     {
         try
         {
@@ -718,7 +840,8 @@ public class GameForm : Form
             var playCardRequest = new
             {
                 LeftValue = leftValue,
-                RightValue = rightValue
+                RightValue = rightValue,
+                Side = side
             };
 
             var message = new NetworkMessage
@@ -736,6 +859,46 @@ public class GameForm : Form
         {
             SetHandEnabled(true);
             MessageBox.Show($"Failed to play card: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async void BtnDraw_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            var message = new NetworkMessage
+            {
+                Action = "DRAW_CARD",
+                Username = _username,
+                RoomName = _roomName,
+                Timestamp = DateTime.UtcNow
+            };
+
+            await _clientManager.SendAsync(JsonSerializer.Serialize(message));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to request draw: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async void BtnPass_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            var message = new NetworkMessage
+            {
+                Action = "PASS",
+                Username = _username,
+                RoomName = _roomName,
+                Timestamp = DateTime.UtcNow
+            };
+
+            await _clientManager.SendAsync(JsonSerializer.Serialize(message));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to request pass: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -885,13 +1048,9 @@ public class GameForm : Form
             Height = 130
         };
 
-        // Determine middle index (first tile goes in center)
-        int middleIndex = boardTiles.Count > 0 ? 0 : -1;
-
-        // Add tiles
-        for (int i = 0; i < boardTiles.Count; i++)
+        // Add tiles in order to the right flow (simple linear rendering)
+        foreach (var tile in boardTiles)
         {
-            var tile = boardTiles[i];
             var dominoTile = new DominoTileControl
             {
                 LeftValue = tile.LeftValue,
@@ -901,30 +1060,7 @@ public class GameForm : Form
             };
 
             dominoTile.Enabled = false;
-
-            if (i < middleIndex)
-            {
-                // Tiles before middle go to left (added in reverse order)
-                leftFlow.Controls.Add(dominoTile);
-            }
-            else if (i == middleIndex)
-            {
-                // Middle tile (first placed) - add to both but highlight
-                var centerTile = new DominoTileControl
-                {
-                    LeftValue = tile.LeftValue,
-                    RightValue = tile.RightValue,
-                    Margin = new Padding(3),
-                    Size = new Size(80, 120)
-                };
-                centerTile.Enabled = false;
-                leftFlow.Controls.Add(centerTile);
-            }
-            else
-            {
-                // Tiles after middle go to right
-                rightFlow.Controls.Add(dominoTile);
-            }
+            rightFlow.Controls.Add(dominoTile);
         }
 
         mainContainer.Controls.Add(leftFlow, 0, 1);

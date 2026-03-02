@@ -11,6 +11,7 @@ public class DominoTileControl : UserControl
     private int _rightValue;
     private bool _isSelected;
     private bool _isHovered;
+    private bool _isPlayable;
 
     public event EventHandler? TileClicked;
 
@@ -47,6 +48,17 @@ public class DominoTileControl : UserControl
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool IsPlayable
+    {
+        get => _isPlayable;
+        set
+        {
+            _isPlayable = value;
+            Invalidate();
+        }
+    }
+
     public DominoTileControl()
     {
         SetStyle(ControlStyles.UserPaint | 
@@ -71,8 +83,16 @@ public class DominoTileControl : UserControl
 
         // Determine colors based on state
         Color bgColor = _isSelected ? Color.FromArgb(100, 180, 255) : Color.White;
-        Color borderColor = _isSelected ? Color.FromArgb(0, 120, 215) : 
-                           _isHovered ? Color.FromArgb(100, 100, 100) : Color.Black;
+        // Playable tiles get a green border; selected gets blue; hovered gets gray
+        Color borderColor;
+        if (_isSelected)
+            borderColor = Color.FromArgb(0, 120, 215);
+        else if (_isPlayable)
+            borderColor = Color.FromArgb(0, 180, 0);
+        else if (_isHovered)
+            borderColor = Color.FromArgb(100, 100, 100);
+        else
+            borderColor = Color.Black;
         int borderWidth = _isSelected ? 3 : _isHovered ? 2 : 1;
 
         // Draw main rectangle (domino body)

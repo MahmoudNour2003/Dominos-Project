@@ -304,7 +304,16 @@ public class RoomManager
             if (room != null)
             {
                 SendResponseToClient(handler, "CREATE_ROOM", true, "Room created successfully");
+                // Broadcast updated room list to all clients
                 _ = BroadcastRoomListAsync();
+                // Also broadcast a ROOM_CREATED event with the new room details so clients can update incrementally
+                var createdMsg = new NetworkMessage
+                {
+                    Action = "ROOM_CREATED",
+                    Data = JsonSerializer.Serialize(room),
+                    Timestamp = DateTime.UtcNow
+                };
+                _ = _serverManager.BroadcastAsync(createdMsg);
             }
             else
             {
